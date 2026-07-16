@@ -62,7 +62,9 @@ function App() {
     const response = await fetch(`${API_URL}${path}`, options);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload.error || `Request failed with ${response.status}`);
+      const error = new Error(payload.error || `Request failed with ${response.status}`);
+      error.status = response.status;
+      throw error;
     }
     return payload;
   }
@@ -104,6 +106,11 @@ function App() {
       window.localStorage.setItem("opspilot_token", payload.token);
       setApiStatus("Registered and logged in");
     } catch (error) {
+      if (error.status === 409) {
+        setApiStatus("Account already exists. Logging in...");
+        await login();
+        return;
+      }
       setApiStatus(error.message);
     } finally {
       setBusy(false);
@@ -123,7 +130,7 @@ function App() {
       window.localStorage.setItem("opspilot_token", payload.token);
       setApiStatus("Logged in");
     } catch (error) {
-      setApiStatus(error.message);
+      setApiStatus(`Upload failed: ${error.message}`);
     } finally {
       setBusy(false);
     }
@@ -183,7 +190,9 @@ function App() {
                 Login
               </button>
             </div>
-            <p className="muted-copy">{apiStatus}</p>
+            <p className={`status-message ${apiStatus.toLowerCase().includes("failed") || apiStatus.toLowerCase().includes("invalid") ? "error" : ""}`}>
+              {apiStatus}
+            </p>
           </div>
         </section>
       </main>
@@ -363,6 +372,10 @@ function App() {
             Refresh
           </button>
         </header>
+
+        <div className={`status-banner ${apiStatus.toLowerCase().includes("failed") || apiStatus.toLowerCase().includes("error") ? "error" : ""}`}>
+          {apiStatus}
+        </div>
 
         <section className="control-strip" aria-label="Workspace controls">
           <label>

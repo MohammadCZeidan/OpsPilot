@@ -42,7 +42,8 @@ export function createApp(options = {}) {
       saveState();
       response.status(201).json(result);
     } catch (error) {
-      response.status(400).json({ error: error.message });
+      const status = error.message === "User already exists. Log in instead." ? 409 : 400;
+      response.status(status).json({ error: error.message });
     }
   });
 
