@@ -72,6 +72,27 @@ body {
   font-size: 13px;
 }
 
+.status-message,
+.status-banner {
+  border: 1px solid #b9cfb2;
+  background: #e1eadf;
+  color: var(--moss);
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.45;
+}
+
+.status-message.error,
+.status-banner.error {
+  border-color: #d89a7f;
+  background: #f8ded1;
+  color: #78381f;
+}
+
+.status-banner {
+  margin-bottom: 16px;
+}
+
 button,
 input,
 select,

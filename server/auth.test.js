@@ -23,4 +23,14 @@ describe("auth", () => {
     const token = loginResponse.body.token;
     await request(app).get("/api/workspaces").set("Authorization", `Bearer ${token}`).expect(200);
   });
+
+  test("returns a conflict for duplicate registration", async () => {
+    const app = createApp();
+    const credentials = { email: "duplicate@example.com", password: "secret123" };
+
+    await request(app).post("/api/auth/register").send(credentials).expect(201);
+    const duplicateResponse = await request(app).post("/api/auth/register").send(credentials).expect(409);
+
+    expect(duplicateResponse.body.error).toBe("User already exists. Log in instead.");
+  });
 });

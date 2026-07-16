@@ -62,7 +62,9 @@ function App() {
     const response = await fetch(`${API_URL}${path}`, options);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload.error || `Request failed with ${response.status}`);
+      const error = new Error(payload.error || `Request failed with ${response.status}`);
+      error.status = response.status;
+      throw error;
     }
     return payload;
   }
@@ -76,10 +78,7 @@ function App() {
       }
       setApiStatus(payload.workspaces.length ? "Backend connected" : "Backend connected. Create a workspace.");
     } catch (error) {
-      if (error.message === "Authentication required.") {
-        logout();
-        return;
-      }
+      if (handleAuthError(error)) return;
       setApiStatus(error.message.includes("fetch") ? "Start backend with npm run server" : error.message);
     }
   }
@@ -89,6 +88,14 @@ function App() {
       ...extra,
       Authorization: `Bearer ${token}`,
     };
+  }
+
+  function handleAuthError(error) {
+    if (error.status === 401 || error.message === "Authentication required.") {
+      logout("Session expired. Please log in again.");
+      return true;
+    }
+    return false;
   }
 
   async function register() {
@@ -104,6 +111,11 @@ function App() {
       window.localStorage.setItem("opspilot_token", payload.token);
       setApiStatus("Registered and logged in");
     } catch (error) {
+      if (error.status === 409) {
+        setApiStatus("Account already exists. Logging in...");
+        await login();
+        return;
+      }
       setApiStatus(error.message);
     } finally {
       setBusy(false);
@@ -129,7 +141,7 @@ function App() {
     }
   }
 
-  function logout() {
+  function logout(message = "Logged out") {
     setToken("");
     setUser(null);
     setWorkspace(null);
@@ -138,7 +150,7 @@ function App() {
     setConversations([]);
     setAdminLogs([]);
     window.localStorage.removeItem("opspilot_token");
-    setApiStatus("Logged out");
+    setApiStatus(message);
   }
 
   if (!token) {
@@ -183,7 +195,9 @@ function App() {
                 Login
               </button>
             </div>
-            <p className="muted-copy">{apiStatus}</p>
+            <p className={`status-message ${apiStatus.toLowerCase().includes("failed") || apiStatus.toLowerCase().includes("invalid") ? "error" : ""}`}>
+              {apiStatus}
+            </p>
           </div>
         </section>
       </main>
@@ -192,16 +206,21 @@ function App() {
 
   async function refreshWorkspaceData(workspaceId = selectedWorkspaceId) {
     if (!workspaceId) return;
-    const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
-      api(`/workspaces/${workspaceId}`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/documents`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/conversations`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/logs`, { headers: authHeaders() }),
-    ]);
-    setWorkspace(workspacePayload.workspace);
-    setDocuments(documentPayload.documents);
-    setConversations(conversationPayload.conversations);
-    setAdminLogs(logsPayload.logs);
+    try {
+      const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
+        api(`/workspaces/${workspaceId}`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/documents`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/conversations`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/logs`, { headers: authHeaders() }),
+      ]);
+      setWorkspace(workspacePayload.workspace);
+      setDocuments(documentPayload.documents);
+      setConversations(conversationPayload.conversations);
+      setAdminLogs(logsPayload.logs);
+    } catch (error) {
+      if (handleAuthError(error)) return;
+      setApiStatus(error.message);
+    }
   }
 
   async function createWorkspace() {
@@ -363,6 +382,10 @@ function App() {
             Refresh
           </button>
         </header>
+
+        <div className={`status-banner ${apiStatus.toLowerCase().includes("failed") || apiStatus.toLowerCase().includes("error") ? "error" : ""}`}>
+          {apiStatus}
+        </div>
 
         <section className="control-strip" aria-label="Workspace controls">
           <label>

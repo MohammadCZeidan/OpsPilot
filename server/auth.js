@@ -9,7 +9,7 @@ export async function registerUser(users, { email, password }) {
     throw new Error("Email and a password of at least 6 characters are required.");
   }
   if (users.has(normalizedEmail)) {
-    throw new Error("User already exists.");
+    throw new Error("User already exists. Log in instead.");
   }
 
   const user = {
