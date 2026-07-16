@@ -78,10 +78,7 @@ function App() {
       }
       setApiStatus(payload.workspaces.length ? "Backend connected" : "Backend connected. Create a workspace.");
     } catch (error) {
-      if (error.message === "Authentication required.") {
-        logout();
-        return;
-      }
+      if (handleAuthError(error)) return;
       setApiStatus(error.message.includes("fetch") ? "Start backend with npm run server" : error.message);
     }
   }
@@ -91,6 +88,14 @@ function App() {
       ...extra,
       Authorization: `Bearer ${token}`,
     };
+  }
+
+  function handleAuthError(error) {
+    if (error.status === 401 || error.message === "Authentication required.") {
+      logout("Session expired. Please log in again.");
+      return true;
+    }
+    return false;
   }
 
   async function register() {
@@ -130,13 +135,13 @@ function App() {
       window.localStorage.setItem("opspilot_token", payload.token);
       setApiStatus("Logged in");
     } catch (error) {
-      setApiStatus(`Upload failed: ${error.message}`);
+      setApiStatus(error.message);
     } finally {
       setBusy(false);
     }
   }
 
-  function logout() {
+  function logout(message = "Logged out") {
     setToken("");
     setUser(null);
     setWorkspace(null);
@@ -145,7 +150,7 @@ function App() {
     setConversations([]);
     setAdminLogs([]);
     window.localStorage.removeItem("opspilot_token");
-    setApiStatus("Logged out");
+    setApiStatus(message);
   }
 
   if (!token) {
@@ -201,16 +206,21 @@ function App() {
 
   async function refreshWorkspaceData(workspaceId = selectedWorkspaceId) {
     if (!workspaceId) return;
-    const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
-      api(`/workspaces/${workspaceId}`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/documents`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/conversations`, { headers: authHeaders() }),
-      api(`/workspaces/${workspaceId}/logs`, { headers: authHeaders() }),
-    ]);
-    setWorkspace(workspacePayload.workspace);
-    setDocuments(documentPayload.documents);
-    setConversations(conversationPayload.conversations);
-    setAdminLogs(logsPayload.logs);
+    try {
+      const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
+        api(`/workspaces/${workspaceId}`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/documents`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/conversations`, { headers: authHeaders() }),
+        api(`/workspaces/${workspaceId}/logs`, { headers: authHeaders() }),
+      ]);
+      setWorkspace(workspacePayload.workspace);
+      setDocuments(documentPayload.documents);
+      setConversations(conversationPayload.conversations);
+      setAdminLogs(logsPayload.logs);
+    } catch (error) {
+      if (handleAuthError(error)) return;
+      setApiStatus(error.message);
+    }
   }
 
   async function createWorkspace() {
