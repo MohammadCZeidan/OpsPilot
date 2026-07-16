@@ -40,6 +40,42 @@ describe("OpsPilot API", () => {
 
     const logsResponse = await request(app).get(`/api/workspaces/${workspaceId}/logs`).expect(200);
     expect(logsResponse.body.logs.some((log) => log.event === "query")).toBe(true);
+
+    const listResponse = await request(app).get("/api/workspaces").expect(200);
+    expect(listResponse.body.workspaces).toEqual([
+      expect.objectContaining({
+        id: workspaceId,
+        documentCount: 1,
+        conversationCount: 1,
+        feedbackCount: 1,
+      }),
+    ]);
+
+    const documentsResponse = await request(app).get(`/api/workspaces/${workspaceId}/documents`).expect(200);
+    expect(documentsResponse.body.documents).toEqual([
+      expect.objectContaining({
+        filename: "runbook.md",
+        chunkCount: 1,
+      }),
+    ]);
+
+    const conversationsResponse = await request(app).get(`/api/workspaces/${workspaceId}/conversations`).expect(200);
+    expect(conversationsResponse.body.conversations[0].question).toBe("Why are refund requests delayed?");
+  });
+
+  test("rejects unsupported document uploads before ingestion", async () => {
+    const app = createApp();
+    const workspaceResponse = await request(app).post("/api/workspaces").send({ name: "Uploads" }).expect(201);
+    const workspaceId = workspaceResponse.body.workspace.id;
+
+    await request(app)
+      .post(`/api/workspaces/${workspaceId}/documents`)
+      .send({
+        filename: "slides.pdf",
+        mimeType: "application/pdf",
+        text: "",
+      })
+      .expect(400);
   });
 });
 

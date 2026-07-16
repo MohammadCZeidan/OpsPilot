@@ -2,163 +2,175 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
-  ArrowRight,
   Bot,
-  Check,
-  ChevronDown,
+  CheckCircle2,
   CircleAlert,
-  ClipboardCheck,
-  ExternalLink,
+  Database,
   FileText,
-  Globe2,
   Loader2,
-  Mail,
-  Play,
+  MessageSquareText,
+  RefreshCw,
   Search,
   Send,
-  Sparkles,
-  Target,
+  Upload,
   UserCheck,
+  XCircle,
 } from "lucide-react";
 import "./styles.css";
 
 const API_URL = "http://127.0.0.1:8787/api";
 
-const seedCompanies = [
-  {
-    name: "Northstar Clinics",
-    url: "https://northstar.example",
-    market: "multi-location healthcare operations",
-    signal: "hiring care coordinators while support tickets rise",
-    status: "Ready",
-    fit: 91,
-  },
-  {
-    name: "Harbor FreightOps",
-    url: "https://harborops.example",
-    market: "logistics and route planning",
-    signal: "recent warehouse expansion and manual dispatch workflows",
-    status: "Needs approval",
-    fit: 84,
-  },
-  {
-    name: "LedgerLeaf",
-    url: "https://ledgerleaf.example",
-    market: "bookkeeping for small businesses",
-    signal: "publishing AI assistant roles and onboarding content",
-    status: "Drafting",
-    fit: 78,
-  },
-];
-
-const pipelineSteps = [
-  { title: "Company map", icon: Globe2, state: "complete" },
-  { title: "Buyer personas", icon: UserCheck, state: "complete" },
-  { title: "Pain signals", icon: Search, state: "active" },
-  { title: "Outreach draft", icon: Mail, state: "queued" },
-  { title: "Human review", icon: ClipboardCheck, state: "queued" },
-];
-
-const sourceNotes = [
-  "Care team page mentions 24/7 scheduling load and fragmented intake forms.",
-  "Job post asks for automation around insurance eligibility and document routing.",
-  "Founder interview says speed-to-first-response is a board-level metric.",
-];
-
 function App() {
-  const [targetUrl, setTargetUrl] = useState("https://northstar.example");
-  const [persona, setPersona] = useState("VP Operations");
-  const [tone, setTone] = useState("Direct");
-  const [running, setRunning] = useState(false);
-  const [approved, setApproved] = useState(false);
+  const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
-  const [workspaceName, setWorkspaceName] = useState("OpsPilot Demo");
-  const [documentText, setDocumentText] = useState(
-    "Refund requests are delayed because support agents manually inspect invoices before approval.\n\nThe operations team wants cited answers, source highlights, and feedback tracking."
-  );
-  const [documentName, setDocumentName] = useState("ops-runbook.md");
-  const [question, setQuestion] = useState("Why are refund requests delayed?");
-  const [ragResult, setRagResult] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [conversations, setConversations] = useState([]);
   const [adminLogs, setAdminLogs] = useState([]);
-  const [apiStatus, setApiStatus] = useState("Starting workspace...");
-  const [asking, setAsking] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("My AI Workspace");
+  const [ownerEmail, setOwnerEmail] = useState("demo@opspilot.local");
+  const [documentText, setDocumentText] = useState("");
+  const [documentName, setDocumentName] = useState("knowledge.md");
+  const [question, setQuestion] = useState("");
+  const [ragResult, setRagResult] = useState(null);
+  const [apiStatus, setApiStatus] = useState("Checking backend...");
+  const [busy, setBusy] = useState(false);
 
-  const selectedCompany = useMemo(
-    () => seedCompanies.find((company) => company.url === targetUrl) ?? seedCompanies[0],
-    [targetUrl]
+  const selectedWorkspaceId = workspace?.id || "";
+  const activeWorkspace = useMemo(
+    () => workspaces.find((item) => item.id === selectedWorkspaceId) || workspace,
+    [selectedWorkspaceId, workspace, workspaces]
   );
-
-  function runAgent() {
-    setRunning(true);
-    window.setTimeout(() => setRunning(false), 1200);
-  }
 
   useEffect(() => {
-    createDemoWorkspace();
+    loadWorkspaces();
   }, []);
 
-  async function createDemoWorkspace() {
+  useEffect(() => {
+    if (!selectedWorkspaceId) return;
+    refreshWorkspaceData(selectedWorkspaceId);
+  }, [selectedWorkspaceId]);
+
+  async function api(path, options) {
+    const response = await fetch(`${API_URL}${path}`, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Request failed with ${response.status}`);
+    }
+    return payload;
+  }
+
+  async function loadWorkspaces() {
     try {
-      const response = await fetch(`${API_URL}/workspaces`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: workspaceName, email: "demo@opspilot.local" }),
-      });
-      const payload = await response.json();
-      setWorkspace(payload.workspace);
-      setApiStatus("Workspace ready");
-    } catch {
-      setApiStatus("Start the backend with npm run server");
+      const payload = await api("/workspaces");
+      setWorkspaces(payload.workspaces);
+      if (!workspace && payload.workspaces.length) {
+        setWorkspace(payload.workspaces[0]);
+      }
+      setApiStatus(payload.workspaces.length ? "Backend connected" : "Backend connected. Create a workspace.");
+    } catch (error) {
+      setApiStatus(error.message.includes("fetch") ? "Start backend with npm run server" : error.message);
     }
   }
 
-  async function refreshLogs(workspaceId = workspace?.id) {
+  async function refreshWorkspaceData(workspaceId = selectedWorkspaceId) {
     if (!workspaceId) return;
-    const response = await fetch(`${API_URL}/workspaces/${workspaceId}/logs`);
-    const payload = await response.json();
-    setAdminLogs(payload.logs);
+    const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
+      api(`/workspaces/${workspaceId}`),
+      api(`/workspaces/${workspaceId}/documents`),
+      api(`/workspaces/${workspaceId}/conversations`),
+      api(`/workspaces/${workspaceId}/logs`),
+    ]);
+    setWorkspace(workspacePayload.workspace);
+    setDocuments(documentPayload.documents);
+    setConversations(conversationPayload.conversations);
+    setAdminLogs(logsPayload.logs);
+  }
+
+  async function createWorkspace() {
+    setBusy(true);
+    try {
+      const payload = await api("/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: workspaceName, email: ownerEmail }),
+      });
+      setWorkspace(payload.workspace);
+      setApiStatus("Workspace created");
+      await loadWorkspaces();
+    } catch (error) {
+      setApiStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function ingestCurrentDocument() {
     if (!workspace) return;
-    setApiStatus("Ingesting document...");
-    const response = await fetch(`${API_URL}/workspaces/${workspace.id}/documents`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: documentName,
-        mimeType: documentName.endsWith(".md") ? "text/markdown" : "text/plain",
-        text: documentText,
-      }),
-    });
-    const payload = await response.json();
-    setApiStatus(`Ingested ${payload.document.chunkCount} cited chunk(s)`);
-    await refreshLogs();
+    setBusy(true);
+    try {
+      const payload = await api(`/workspaces/${workspace.id}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: documentName,
+          mimeType: documentName.endsWith(".md") ? "text/markdown" : "text/plain",
+          text: documentText,
+        }),
+      });
+      setApiStatus(`Ingested ${payload.document.chunkCount} cited chunk(s)`);
+      setDocumentText("");
+      await refreshWorkspaceData();
+      await loadWorkspaces();
+    } catch (error) {
+      setApiStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function ingestFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setDocumentName(file.name);
+    const text = await file.text();
+    setDocumentText(text);
+    event.target.value = "";
   }
 
   async function askRagQuestion() {
     if (!workspace) return;
-    setAsking(true);
-    const response = await fetch(`${API_URL}/workspaces/${workspace.id}/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
-    });
-    const payload = await response.json();
-    setRagResult(payload);
-    setAsking(false);
-    await refreshLogs();
+    setBusy(true);
+    try {
+      const payload = await api(`/workspaces/${workspace.id}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      setRagResult(payload);
+      setApiStatus("Grounded answer generated");
+      await refreshWorkspaceData();
+      await loadWorkspaces();
+    } catch (error) {
+      setApiStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function sendFeedback(rating) {
     if (!workspace || !ragResult) return;
-    await fetch(`${API_URL}/workspaces/${workspace.id}/feedback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queryId: ragResult.id, rating }),
-    });
-    setApiStatus(`Feedback saved: ${rating.replace("_", " ")}`);
-    await refreshLogs();
+    try {
+      await api(`/workspaces/${workspace.id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queryId: ragResult.id, rating }),
+      });
+      setApiStatus(`Feedback saved: ${rating.replace("_", " ")}`);
+      await refreshWorkspaceData();
+      await loadWorkspaces();
+    } catch (error) {
+      setApiStatus(error.message);
+    }
   }
 
   return (
@@ -170,72 +182,65 @@ function App() {
           </div>
           <div>
             <strong>OpsPilot</strong>
-            <span>agentic sales research</span>
+            <span>backend-backed RAG system</span>
           </div>
         </div>
 
         <nav className="nav-list" aria-label="Main navigation">
           <button className="nav-item active">
-            <Activity size={17} /> Workspace
+            <Database size={17} /> Workspaces
           </button>
           <button className="nav-item">
-            <Target size={17} /> Leads
+            <FileText size={17} /> Documents
           </button>
           <button className="nav-item">
-            <FileText size={17} /> Playbooks
+            <MessageSquareText size={17} /> Answers
           </button>
         </nav>
 
         <section className="sidebar-panel">
-          <span className="panel-label">Today</span>
-          <strong>12 leads researched</strong>
-          <p>5 drafts waiting for human approval before outreach.</p>
+          <span className="panel-label">Backend status</span>
+          <strong>{apiStatus}</strong>
+          <p>No seeded leads or fake company data are rendered. Every count comes from the API.</p>
         </section>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">AI agent command center</p>
-            <h1>Turn target accounts into sourced outreach plans.</h1>
+            <p className="eyebrow">AI command center</p>
+            <h1>Build a real workspace, ingest documents, ask grounded questions.</h1>
           </div>
-          <button className="primary-action" onClick={runAgent}>
-            {running ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-            Run agent
+          <button className="primary-action" onClick={() => refreshWorkspaceData()} disabled={!workspace}>
+            <RefreshCw size={18} />
+            Refresh
           </button>
         </header>
 
-        <section className="control-strip" aria-label="Research controls">
+        <section className="control-strip" aria-label="Workspace controls">
           <label>
-            Company
+            Active workspace
             <div className="select-shell">
-              <select value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)}>
-                {seedCompanies.map((company) => (
-                  <option value={company.url} key={company.url}>
-                    {company.name}
+              <select
+                value={selectedWorkspaceId}
+                onChange={(event) => setWorkspace(workspaces.find((item) => item.id === event.target.value))}
+              >
+                <option value="">Choose a workspace</option>
+                {workspaces.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
                   </option>
                 ))}
               </select>
-              <ChevronDown size={16} />
             </div>
           </label>
           <label>
-            Persona
-            <input value={persona} onChange={(event) => setPersona(event.target.value)} />
+            New workspace
+            <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
           </label>
           <label>
-            Tone
-            <div className="segmented">
-              {["Direct", "Warm", "Technical"].map((option) => (
-                <button
-                  className={tone === option ? "selected" : ""}
-                  onClick={() => setTone(option)}
-                  key={option}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
+            Owner email
+            <input value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} />
           </label>
         </section>
 
@@ -243,38 +248,111 @@ function App() {
           <article className="rag-console">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">RAG workspace</p>
-                <h2>Grounded answer engine</h2>
+                <p className="eyebrow">Workspace</p>
+                <h2>{activeWorkspace?.name || "No workspace yet"}</h2>
               </div>
-              <span className="status-pill">{apiStatus}</span>
+              <button className="secondary-action" onClick={createWorkspace} disabled={busy}>
+                <UserCheck size={17} /> Create workspace
+              </button>
+            </div>
+
+            <div className="metric-grid">
+              <Metric label="Documents" value={activeWorkspace?.documentCount || 0} />
+              <Metric label="Chunks" value={activeWorkspace?.chunkCount || 0} />
+              <Metric label="Conversations" value={activeWorkspace?.conversationCount || 0} />
+              <Metric label="Feedback" value={activeWorkspace?.feedbackCount || 0} />
+            </div>
+          </article>
+
+          <article className="rag-console">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Document ingestion</p>
+                <h2>Upload TXT or Markdown</h2>
+              </div>
+              <label className="upload-action">
+                <Upload size={17} />
+                Choose file
+                <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={ingestFile} />
+              </label>
             </div>
 
             <div className="rag-grid">
               <label>
-                Workspace
-                <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
-              </label>
-              <button className="secondary-action" onClick={createDemoWorkspace}>
-                <UserCheck size={17} /> Create workspace
-              </button>
-              <label>
                 Document name
                 <input value={documentName} onChange={(event) => setDocumentName(event.target.value)} />
               </label>
-              <label className="wide-field">
-                Document text
-                <textarea value={documentText} onChange={(event) => setDocumentText(event.target.value)} />
-              </label>
-              <button className="secondary-action" onClick={ingestCurrentDocument} disabled={!workspace}>
+              <button className="secondary-action" onClick={ingestCurrentDocument} disabled={!workspace || busy}>
                 <FileText size={17} /> Ingest document
               </button>
               <label className="wide-field">
-                Ask a question
-                <input value={question} onChange={(event) => setQuestion(event.target.value)} />
+                Document text
+                <textarea
+                  value={documentText}
+                  onChange={(event) => setDocumentText(event.target.value)}
+                  placeholder="Paste real source text here, or choose a .txt/.md file."
+                />
               </label>
-              <button className="primary-action" onClick={askRagQuestion} disabled={!workspace || asking}>
-                {asking ? <Loader2 className="spin" size={18} /> : <Search size={18} />}
-                Ask RAG
+            </div>
+          </article>
+
+          <article className="source-viewer">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Stored documents</p>
+                <h2>Backend inventory</h2>
+              </div>
+            </div>
+            {documents.length ? (
+              documents.map((document) => (
+                <div className="citation-card" key={document.id}>
+                  <strong>{document.filename}</strong>
+                  <p>{document.chunkCount} chunk(s) stored from {document.mimeType}</p>
+                </div>
+              ))
+            ) : (
+              <p className="muted-copy">No documents ingested yet.</p>
+            )}
+          </article>
+
+          <article className="logs-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Admin logs</p>
+                <h2>Latency, cost, model calls</h2>
+              </div>
+              <button className="icon-action" onClick={() => refreshWorkspaceData()} disabled={!workspace} aria-label="Refresh logs">
+                <Activity size={17} />
+              </button>
+            </div>
+            <div className="log-list">
+              {adminLogs.slice(0, 6).map((log) => (
+                <div className="log-row" key={log.id}>
+                  <span>{log.event}</span>
+                  <span>{log.model || log.filename || log.rating}</span>
+                  <strong>{log.latencyMs ?? 0} ms</strong>
+                  <span>${log.estimatedCostUsd ?? 0}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="draft-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Grounded Q&A</p>
+                <h2>Ask the indexed workspace</h2>
+              </div>
+              {busy && <Loader2 className="spin" size={20} />}
+            </div>
+            <div className="ask-row">
+              <input
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                placeholder="Ask a question about your ingested documents"
+              />
+              <button className="primary-action" onClick={askRagQuestion} disabled={!workspace || !question.trim() || busy}>
+                <Search size={18} /> Ask
               </button>
             </div>
 
@@ -283,15 +361,21 @@ function App() {
                 <h3>Answer</h3>
                 <p>{ragResult.answer}</p>
                 <div className="feedback-actions" aria-label="Answer feedback">
-                  <button onClick={() => sendFeedback("correct")}>Correct</button>
-                  <button onClick={() => sendFeedback("wrong")}>Wrong</button>
-                  <button onClick={() => sendFeedback("missing_context")}>Missing context</button>
+                  <button onClick={() => sendFeedback("correct")}>
+                    <CheckCircle2 size={16} /> Correct
+                  </button>
+                  <button onClick={() => sendFeedback("wrong")}>
+                    <XCircle size={16} /> Wrong
+                  </button>
+                  <button onClick={() => sendFeedback("missing_context")}>
+                    <CircleAlert size={16} /> Missing context
+                  </button>
                 </div>
               </div>
             )}
           </article>
 
-          <article className="source-viewer">
+          <article className="lead-table">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Source viewer</p>
@@ -310,128 +394,40 @@ function App() {
             )}
           </article>
 
-          <article className="logs-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Admin logs</p>
-                <h2>Latency, cost, model calls</h2>
-              </div>
-              <button className="icon-action" onClick={() => refreshLogs()} aria-label="Refresh logs">
-                <Activity size={17} />
-              </button>
-            </div>
-            <div className="log-list">
-              {adminLogs.slice(0, 5).map((log) => (
-                <div className="log-row" key={log.id}>
-                  <span>{log.event}</span>
-                  <span>{log.model || log.filename || log.rating}</span>
-                  <strong>{log.latencyMs ?? 0} ms</strong>
-                  <span>${log.estimatedCostUsd ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="agent-map">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Run state</p>
-                <h2>{selectedCompany.name}</h2>
-              </div>
-              <a href={selectedCompany.url} target="_blank" rel="noreferrer">
-                <ExternalLink size={16} /> Source
-              </a>
-            </div>
-
-            <div className="signal-tape" aria-label="Agent pipeline">
-              {pipelineSteps.map((step, index) => {
-                const Icon = step.icon;
-                return (
-                  <div className={`pipeline-node ${step.state}`} key={step.title}>
-                    <div className="node-icon">
-                      <Icon size={18} />
-                    </div>
-                    <span>{step.title}</span>
-                    {index < pipelineSteps.length - 1 && <ArrowRight size={16} />}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="evidence-board">
-              <h3>Evidence collected</h3>
-              {sourceNotes.map((note) => (
-                <div className="evidence-item" key={note}>
-                  <Check size={16} />
-                  <p>{note}</p>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="insight-panel">
-            <p className="eyebrow">Account fit</p>
-            <div className="score-row">
-              <strong>{selectedCompany.fit}</strong>
-              <span>/100</span>
-            </div>
-            <p>{selectedCompany.market}</p>
-            <div className="warning-box">
-              <CircleAlert size={17} />
-              <span>{selectedCompany.signal}</span>
-            </div>
-          </article>
-
-          <article className="draft-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Generated draft</p>
-                <h2>Message for {persona || "the buyer"}</h2>
-              </div>
-              <Sparkles size={20} />
-            </div>
-            <div className="message-preview">
-              <p>Subject: Reducing intake drag at {selectedCompany.name}</p>
-              <p>Hi, I noticed your team is expanding while intake and scheduling complexity are rising.</p>
-              <p>
-                OpsPilot found three signals that point to a practical automation opportunity: eligibility checks,
-                document routing, and faster first response. I built RAG and agent workflows that turn scattered
-                operational docs into auditable next actions.
-              </p>
-              <p>Worth a 15-minute look at where the bottleneck is hiding?</p>
-            </div>
-            <div className="approval-row">
-              <label className="check-row">
-                <input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} />
-                Approve before sending
-              </label>
-              <button className="send-action" disabled={!approved}>
-                <Send size={17} /> Queue outreach
-              </button>
-            </div>
-          </article>
-
           <article className="lead-table">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Lead queue</p>
-                <h2>Research targets</h2>
+                <p className="eyebrow">Conversation memory</p>
+                <h2>Saved backend queries</h2>
               </div>
             </div>
             <div className="table">
-              {seedCompanies.map((company) => (
-                <button className="table-row" onClick={() => setTargetUrl(company.url)} key={company.url}>
-                  <span>{company.name}</span>
-                  <span>{company.market}</span>
-                  <span>{company.status}</span>
-                  <strong>{company.fit}</strong>
-                </button>
-              ))}
+              {conversations.length ? (
+                conversations.map((conversation) => (
+                  <button className="table-row" onClick={() => setRagResult(conversation)} key={conversation.id}>
+                    <span>{conversation.question}</span>
+                    <span>{conversation.citations.length} citation(s)</span>
+                    <span>{new Date(conversation.createdAt).toLocaleString()}</span>
+                    <Send size={16} />
+                  </button>
+                ))
+              ) : (
+                <p className="muted-copy">No questions asked yet.</p>
+              )}
             </div>
           </article>
         </section>
       </section>
     </main>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="metric-tile">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 

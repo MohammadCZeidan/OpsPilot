@@ -29,6 +29,10 @@ export function createApp(options = {}) {
     response.json({ ok: true });
   });
 
+  app.get("/api/workspaces", (_request, response) => {
+    response.json({ workspaces: [...workspaces.values()].map(publicWorkspace) });
+  });
+
   app.post("/api/workspaces", (request, response) => {
     const workspace = createWorkspace(request.body.name || "Untitled Workspace", request.body.email);
     workspaces.set(workspace.id, workspace);
@@ -42,15 +46,46 @@ export function createApp(options = {}) {
     response.json({ workspace: publicWorkspace(workspace) });
   });
 
+  app.get("/api/workspaces/:workspaceId/documents", (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+    if (!workspace) return;
+    response.json({
+      documents: workspace.documents.map((document) => ({
+        id: document.id,
+        filename: document.filename,
+        mimeType: document.mimeType,
+        uploadedAt: document.uploadedAt,
+        chunkCount: document.chunks.length,
+      })),
+    });
+  });
+
+  app.get("/api/workspaces/:workspaceId/conversations", (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+    if (!workspace) return;
+    response.json({ conversations: workspace.conversations });
+  });
+
   app.post("/api/workspaces/:workspaceId/documents", upload.single("file"), (request, response) => {
     const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
     if (!workspace) return;
 
     const uploadedText = request.file?.buffer?.toString("utf8");
+    const filename = request.body.filename || request.file?.originalname || "document.txt";
+    const mimeType = request.body.mimeType || request.file?.mimetype || "text/plain";
+    const text = request.body.text || uploadedText || "";
+
+    if (!isSupportedTextDocument(filename, mimeType, text)) {
+      response.status(400).json({
+        error: "Only TXT, Markdown, and pasted text are currently supported. PDF and DOCX parsing is not wired yet.",
+      });
+      return;
+    }
+
     const document = ingestDocument(workspace, {
-      filename: request.body.filename || request.file?.originalname || "document.txt",
-      mimeType: request.body.mimeType || request.file?.mimetype || "text/plain",
-      text: request.body.text || uploadedText || "",
+      filename,
+      mimeType,
+      text,
     });
     saveWorkspaces(dataFile, workspaces);
 
@@ -87,6 +122,18 @@ export function createApp(options = {}) {
   });
 
   return app;
+}
+
+function isSupportedTextDocument(filename, mimeType, text) {
+  const lowerFilename = filename.toLowerCase();
+  const normalizedMimeType = String(mimeType || "").toLowerCase();
+  const supportedExtension = [".txt", ".md", ".markdown"].some((extension) => lowerFilename.endsWith(extension));
+  const supportedMimeType =
+    normalizedMimeType.startsWith("text/") ||
+    normalizedMimeType === "application/json" ||
+    normalizedMimeType === "application/x-ndjson";
+
+  return Boolean(text.trim()) && (supportedExtension || supportedMimeType);
 }
 
 function findWorkspace(workspaces, workspaceId, response) {
