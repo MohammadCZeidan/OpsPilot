@@ -1,5 +1,8 @@
 import request from "supertest";
 import { describe, expect, test } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createApp } from "./app.js";
 
 describe("OpsPilot API", () => {
@@ -37,5 +40,42 @@ describe("OpsPilot API", () => {
 
     const logsResponse = await request(app).get(`/api/workspaces/${workspaceId}/logs`).expect(200);
     expect(logsResponse.body.logs.some((log) => log.event === "query")).toBe(true);
+  });
+});
+
+describe("OpsPilot API persistence", () => {
+  test("restores workspaces and ingested documents from disk", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opspilot-"));
+    const dataFile = join(directory, "workspaces.json");
+
+    try {
+      const firstApp = createApp({ dataFile });
+      const workspaceResponse = await request(firstApp)
+        .post("/api/workspaces")
+        .send({ name: "Persistent Workspace", email: "founder@example.com" })
+        .expect(201);
+
+      const workspaceId = workspaceResponse.body.workspace.id;
+
+      await request(firstApp)
+        .post(`/api/workspaces/${workspaceId}/documents`)
+        .send({
+          filename: "memory.txt",
+          mimeType: "text/plain",
+          text: "The workspace should survive a server restart.",
+        })
+        .expect(201);
+
+      const secondApp = createApp({ dataFile });
+      const restoredResponse = await request(secondApp).get(`/api/workspaces/${workspaceId}`).expect(200);
+
+      expect(restoredResponse.body.workspace).toMatchObject({
+        id: workspaceId,
+        name: "Persistent Workspace",
+        documentCount: 1,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

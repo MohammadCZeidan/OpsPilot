@@ -7,12 +7,14 @@ import {
   queryWorkspace,
   recordFeedback,
 } from "./rag.js";
+import { loadWorkspaces, saveWorkspaces } from "./store.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-export function createApp() {
+export function createApp(options = {}) {
   const app = express();
-  const workspaces = new Map();
+  const dataFile = options.dataFile || process.env.OPSPILOT_DATA_FILE;
+  const workspaces = loadWorkspaces(dataFile);
 
   app.use((_request, response, next) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
@@ -30,6 +32,7 @@ export function createApp() {
   app.post("/api/workspaces", (request, response) => {
     const workspace = createWorkspace(request.body.name || "Untitled Workspace", request.body.email);
     workspaces.set(workspace.id, workspace);
+    saveWorkspaces(dataFile, workspaces);
     response.status(201).json({ workspace: publicWorkspace(workspace) });
   });
 
@@ -49,6 +52,7 @@ export function createApp() {
       mimeType: request.body.mimeType || request.file?.mimetype || "text/plain",
       text: request.body.text || uploadedText || "",
     });
+    saveWorkspaces(dataFile, workspaces);
 
     response.status(201).json({
       document: {
@@ -63,13 +67,17 @@ export function createApp() {
   app.post("/api/workspaces/:workspaceId/query", (request, response) => {
     const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
     if (!workspace) return;
-    response.json(queryWorkspace(workspace, request.body.question || ""));
+    const result = queryWorkspace(workspace, request.body.question || "");
+    saveWorkspaces(dataFile, workspaces);
+    response.json(result);
   });
 
   app.post("/api/workspaces/:workspaceId/feedback", (request, response) => {
     const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
     if (!workspace) return;
-    response.status(201).json({ feedback: recordFeedback(workspace, request.body.queryId, request.body.rating) });
+    const feedback = recordFeedback(workspace, request.body.queryId, request.body.rating);
+    saveWorkspaces(dataFile, workspaces);
+    response.status(201).json({ feedback });
   });
 
   app.get("/api/workspaces/:workspaceId/logs", (request, response) => {
