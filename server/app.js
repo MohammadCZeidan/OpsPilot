@@ -7,7 +7,9 @@ import {
   queryWorkspace,
   recordFeedback,
 } from "./rag.js";
-import { loadWorkspaces, saveWorkspaces } from "./store.js";
+import { parseDocument } from "./documentParser.js";
+import { loadUsers, loadWorkspaces, saveAppState } from "./store.js";
+import { authenticate, loginUser, registerUser } from "./auth.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -15,10 +17,11 @@ export function createApp(options = {}) {
   const app = express();
   const dataFile = options.dataFile || process.env.OPSPILOT_DATA_FILE;
   const workspaces = loadWorkspaces(dataFile);
+  const users = loadUsers(dataFile);
 
   app.use((_request, response, next) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
-    response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     next();
   });
@@ -26,28 +29,56 @@ export function createApp(options = {}) {
   app.use(express.json({ limit: "5mb" }));
 
   app.get("/api/health", (_request, response) => {
-    response.json({ ok: true });
+    response.json({
+      ok: true,
+      storage: process.env.DATABASE_URL ? "postgres-configured" : "local-json",
+      embeddings: process.env.OPSPILOT_EMBEDDING_PROVIDER || "local",
+    });
   });
 
-  app.get("/api/workspaces", (_request, response) => {
-    response.json({ workspaces: [...workspaces.values()].map(publicWorkspace) });
+  app.post("/api/auth/register", async (request, response) => {
+    try {
+      const result = await registerUser(users, request.body);
+      saveState();
+      response.status(201).json(result);
+    } catch (error) {
+      response.status(400).json({ error: error.message });
+    }
   });
 
-  app.post("/api/workspaces", (request, response) => {
-    const workspace = createWorkspace(request.body.name || "Untitled Workspace", request.body.email);
+  app.post("/api/auth/login", async (request, response) => {
+    try {
+      response.json(await loginUser(users, request.body));
+    } catch (error) {
+      response.status(401).json({ error: error.message });
+    }
+  });
+
+  const requireAuth = (request, response, next) => authenticate(users, request, response, next);
+
+  app.get("/api/workspaces", requireAuth, (request, response) => {
+    response.json({
+      workspaces: [...workspaces.values()]
+        .filter((workspace) => workspace.ownerEmail === request.user.email)
+        .map(publicWorkspace),
+    });
+  });
+
+  app.post("/api/workspaces", requireAuth, (request, response) => {
+    const workspace = createWorkspace(request.body.name || "Untitled Workspace", request.user.email);
     workspaces.set(workspace.id, workspace);
-    saveWorkspaces(dataFile, workspaces);
+    saveState();
     response.status(201).json({ workspace: publicWorkspace(workspace) });
   });
 
-  app.get("/api/workspaces/:workspaceId", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.get("/api/workspaces/:workspaceId", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     response.json({ workspace: publicWorkspace(workspace) });
   });
 
-  app.get("/api/workspaces/:workspaceId/documents", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.get("/api/workspaces/:workspaceId/documents", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     response.json({
       documents: workspace.documents.map((document) => ({
@@ -60,34 +91,37 @@ export function createApp(options = {}) {
     });
   });
 
-  app.get("/api/workspaces/:workspaceId/conversations", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.get("/api/workspaces/:workspaceId/conversations", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     response.json({ conversations: workspace.conversations });
   });
 
-  app.post("/api/workspaces/:workspaceId/documents", upload.single("file"), (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.post("/api/workspaces/:workspaceId/documents", requireAuth, upload.single("file"), async (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
 
-    const uploadedText = request.file?.buffer?.toString("utf8");
-    const filename = request.body.filename || request.file?.originalname || "document.txt";
-    const mimeType = request.body.mimeType || request.file?.mimetype || "text/plain";
-    const text = request.body.text || uploadedText || "";
-
-    if (!isSupportedTextDocument(filename, mimeType, text)) {
+    let parsedDocument;
+    try {
+      parsedDocument = await parseDocument({
+        filename: request.body.filename || request.file?.originalname || "document.txt",
+        mimeType: request.body.mimeType || request.file?.mimetype || "text/plain",
+        buffer: request.file?.buffer,
+        text: request.body.text,
+      });
+    } catch (error) {
       response.status(400).json({
-        error: "Only TXT, Markdown, and pasted text are currently supported. PDF and DOCX parsing is not wired yet.",
+        error: error.message,
       });
       return;
     }
 
     const document = ingestDocument(workspace, {
-      filename,
-      mimeType,
-      text,
+      filename: parsedDocument.filename,
+      mimeType: parsedDocument.mimeType,
+      text: parsedDocument.text,
     });
-    saveWorkspaces(dataFile, workspaces);
+    saveState();
 
     response.status(201).json({
       document: {
@@ -99,46 +133,38 @@ export function createApp(options = {}) {
     });
   });
 
-  app.post("/api/workspaces/:workspaceId/query", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.post("/api/workspaces/:workspaceId/query", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     const result = queryWorkspace(workspace, request.body.question || "");
-    saveWorkspaces(dataFile, workspaces);
+    saveState();
     response.json(result);
   });
 
-  app.post("/api/workspaces/:workspaceId/feedback", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.post("/api/workspaces/:workspaceId/feedback", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     const feedback = recordFeedback(workspace, request.body.queryId, request.body.rating);
-    saveWorkspaces(dataFile, workspaces);
+    saveState();
     response.status(201).json({ feedback });
   });
 
-  app.get("/api/workspaces/:workspaceId/logs", (request, response) => {
-    const workspace = findWorkspace(workspaces, request.params.workspaceId, response);
+  app.get("/api/workspaces/:workspaceId/logs", requireAuth, (request, response) => {
+    const workspace = findWorkspace(workspaces, request.params.workspaceId, response, request.user);
     if (!workspace) return;
     response.json({ logs: getAdminLogs(workspace) });
   });
 
   return app;
+
+  function saveState() {
+    saveAppState(dataFile, { workspaces, users });
+  }
 }
 
-function isSupportedTextDocument(filename, mimeType, text) {
-  const lowerFilename = filename.toLowerCase();
-  const normalizedMimeType = String(mimeType || "").toLowerCase();
-  const supportedExtension = [".txt", ".md", ".markdown"].some((extension) => lowerFilename.endsWith(extension));
-  const supportedMimeType =
-    normalizedMimeType.startsWith("text/") ||
-    normalizedMimeType === "application/json" ||
-    normalizedMimeType === "application/x-ndjson";
-
-  return Boolean(text.trim()) && (supportedExtension || supportedMimeType);
-}
-
-function findWorkspace(workspaces, workspaceId, response) {
+function findWorkspace(workspaces, workspaceId, response, user) {
   const workspace = workspaces.get(workspaceId);
-  if (!workspace) {
+  if (!workspace || (user && workspace.ownerEmail !== user.email)) {
     response.status(404).json({ error: "Workspace not found" });
     return null;
   }

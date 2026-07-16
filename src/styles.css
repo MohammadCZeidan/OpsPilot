@@ -23,6 +23,55 @@ body {
   min-width: 320px;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(90deg, rgba(49, 93, 72, 0.09) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(49, 93, 72, 0.07) 1px, transparent 1px),
+    var(--canvas);
+  background-size: 44px 44px;
+}
+
+.auth-panel {
+  width: min(920px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 0.9fr;
+  gap: 28px;
+  align-items: center;
+  background: rgba(255, 253, 248, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.auth-copy h1 {
+  margin: 8px 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 5vw, 64px);
+  line-height: 0.95;
+}
+
+.auth-copy p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 button,
 input,
 select,
@@ -513,6 +562,18 @@ select {
   margin-top: 18px;
 }
 
+.auth-actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.logout-action {
+  height: 44px;
+  width: 100%;
+}
+
 .citation-card {
   border-top: 1px solid var(--line);
   padding: 14px 0;
@@ -643,6 +704,10 @@ mark {
   }
 
   .table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-panel {
     grid-template-columns: 1fr;
   }
 }

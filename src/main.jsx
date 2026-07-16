@@ -27,13 +27,17 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [adminLogs, setAdminLogs] = useState([]);
   const [workspaceName, setWorkspaceName] = useState("My AI Workspace");
-  const [ownerEmail, setOwnerEmail] = useState("demo@opspilot.local");
   const [documentText, setDocumentText] = useState("");
   const [documentName, setDocumentName] = useState("knowledge.md");
+  const [selectedFile, setSelectedFile] = useState(null);
   const [question, setQuestion] = useState("");
   const [ragResult, setRagResult] = useState(null);
   const [apiStatus, setApiStatus] = useState("Checking backend...");
   const [busy, setBusy] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [token, setToken] = useState(() => window.localStorage.getItem("opspilot_token") || "");
+  const [user, setUser] = useState(null);
 
   const selectedWorkspaceId = workspace?.id || "";
   const activeWorkspace = useMemo(
@@ -42,8 +46,12 @@ function App() {
   );
 
   useEffect(() => {
-    loadWorkspaces();
-  }, []);
+    if (token) {
+      loadWorkspaces();
+    } else {
+      setApiStatus("Register or log in to start.");
+    }
+  }, [token]);
 
   useEffect(() => {
     if (!selectedWorkspaceId) return;
@@ -61,24 +69,134 @@ function App() {
 
   async function loadWorkspaces() {
     try {
-      const payload = await api("/workspaces");
+      const payload = await api("/workspaces", { headers: authHeaders() });
       setWorkspaces(payload.workspaces);
       if (!workspace && payload.workspaces.length) {
         setWorkspace(payload.workspaces[0]);
       }
       setApiStatus(payload.workspaces.length ? "Backend connected" : "Backend connected. Create a workspace.");
     } catch (error) {
+      if (error.message === "Authentication required.") {
+        logout();
+        return;
+      }
       setApiStatus(error.message.includes("fetch") ? "Start backend with npm run server" : error.message);
     }
+  }
+
+  function authHeaders(extra = {}) {
+    return {
+      ...extra,
+      Authorization: `Bearer ${token}`,
+    };
+  }
+
+  async function register() {
+    setBusy(true);
+    try {
+      const payload = await api("/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, password: authPassword }),
+      });
+      setToken(payload.token);
+      setUser(payload.user);
+      window.localStorage.setItem("opspilot_token", payload.token);
+      setApiStatus("Registered and logged in");
+    } catch (error) {
+      setApiStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function login() {
+    setBusy(true);
+    try {
+      const payload = await api("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, password: authPassword }),
+      });
+      setToken(payload.token);
+      setUser(payload.user);
+      window.localStorage.setItem("opspilot_token", payload.token);
+      setApiStatus("Logged in");
+    } catch (error) {
+      setApiStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function logout() {
+    setToken("");
+    setUser(null);
+    setWorkspace(null);
+    setWorkspaces([]);
+    setDocuments([]);
+    setConversations([]);
+    setAdminLogs([]);
+    window.localStorage.removeItem("opspilot_token");
+    setApiStatus("Logged out");
+  }
+
+  if (!token) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="brand-lockup">
+            <div className="brand-mark">
+              <Bot size={20} />
+            </div>
+            <div>
+              <strong>OpsPilot</strong>
+              <span>secure RAG workspace</span>
+            </div>
+          </div>
+
+          <div className="auth-copy">
+            <p className="eyebrow">Sign in first</p>
+            <h1>Access your grounded AI workspace.</h1>
+            <p>Register or log in before creating workspaces, uploading documents, and asking citation-backed questions.</p>
+          </div>
+
+          <div className="auth-form">
+            <label>
+              Email
+              <input value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="you@example.com" />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                placeholder="At least 6 characters"
+              />
+            </label>
+            <div className="auth-actions">
+              <button className="secondary-action" onClick={register} disabled={busy}>
+                Register
+              </button>
+              <button className="primary-action" onClick={login} disabled={busy}>
+                Login
+              </button>
+            </div>
+            <p className="muted-copy">{apiStatus}</p>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   async function refreshWorkspaceData(workspaceId = selectedWorkspaceId) {
     if (!workspaceId) return;
     const [workspacePayload, documentPayload, conversationPayload, logsPayload] = await Promise.all([
-      api(`/workspaces/${workspaceId}`),
-      api(`/workspaces/${workspaceId}/documents`),
-      api(`/workspaces/${workspaceId}/conversations`),
-      api(`/workspaces/${workspaceId}/logs`),
+      api(`/workspaces/${workspaceId}`, { headers: authHeaders() }),
+      api(`/workspaces/${workspaceId}/documents`, { headers: authHeaders() }),
+      api(`/workspaces/${workspaceId}/conversations`, { headers: authHeaders() }),
+      api(`/workspaces/${workspaceId}/logs`, { headers: authHeaders() }),
     ]);
     setWorkspace(workspacePayload.workspace);
     setDocuments(documentPayload.documents);
@@ -91,8 +209,8 @@ function App() {
     try {
       const payload = await api("/workspaces", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: workspaceName, email: ownerEmail }),
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ name: workspaceName }),
       });
       setWorkspace(payload.workspace);
       setApiStatus("Workspace created");
@@ -108,17 +226,27 @@ function App() {
     if (!workspace) return;
     setBusy(true);
     try {
-      const payload = await api(`/workspaces/${workspace.id}/documents`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: documentName,
-          mimeType: documentName.endsWith(".md") ? "text/markdown" : "text/plain",
-          text: documentText,
-        }),
-      });
+      const request =
+        selectedFile
+          ? {
+              method: "POST",
+              headers: authHeaders(),
+              body: multipartDocumentBody(selectedFile, documentName),
+            }
+          : {
+              method: "POST",
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({
+                filename: documentName,
+                mimeType: documentName.endsWith(".md") ? "text/markdown" : "text/plain",
+                text: documentText,
+              }),
+            };
+
+      const payload = await api(`/workspaces/${workspace.id}/documents`, request);
       setApiStatus(`Ingested ${payload.document.chunkCount} cited chunk(s)`);
       setDocumentText("");
+      setSelectedFile(null);
       await refreshWorkspaceData();
       await loadWorkspaces();
     } catch (error) {
@@ -131,10 +259,29 @@ function App() {
   async function ingestFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedFile(file);
     setDocumentName(file.name);
-    const text = await file.text();
-    setDocumentText(text);
+    if (file.type.startsWith("text/") || /\.(txt|md|markdown)$/i.test(file.name)) {
+      setDocumentText(await file.text());
+    } else {
+      setDocumentText(`Selected binary document: ${file.name}. Click Ingest document to parse it on the backend.`);
+    }
     event.target.value = "";
+  }
+
+  function multipartDocumentBody(file, filename) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("filename", filename);
+    formData.append("mimeType", file.type || inferMimeType(filename));
+    return formData;
+  }
+
+  function inferMimeType(filename) {
+    if (/\.pdf$/i.test(filename)) return "application/pdf";
+    if (/\.docx$/i.test(filename)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (/\.(md|markdown)$/i.test(filename)) return "text/markdown";
+    return "text/plain";
   }
 
   async function askRagQuestion() {
@@ -143,7 +290,7 @@ function App() {
     try {
       const payload = await api(`/workspaces/${workspace.id}/query`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ question }),
       });
       setRagResult(payload);
@@ -162,7 +309,7 @@ function App() {
     try {
       await api(`/workspaces/${workspace.id}/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ queryId: ragResult.id, rating }),
       });
       setApiStatus(`Feedback saved: ${rating.replace("_", " ")}`);
@@ -201,7 +348,7 @@ function App() {
         <section className="sidebar-panel">
           <span className="panel-label">Backend status</span>
           <strong>{apiStatus}</strong>
-          <p>No seeded leads or fake company data are rendered. Every count comes from the API.</p>
+          <p>Logged in as {user?.email || authEmail || "token user"}. JWT is stored locally for this browser session.</p>
         </section>
       </aside>
 
@@ -239,8 +386,10 @@ function App() {
             <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
           </label>
           <label>
-            Owner email
-            <input value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} />
+            Session
+            <button className="icon-action logout-action" onClick={logout}>
+              Logout
+            </button>
           </label>
         </section>
 
@@ -268,12 +417,16 @@ function App() {
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Document ingestion</p>
-                <h2>Upload TXT or Markdown</h2>
+                <h2>Upload TXT, Markdown, PDF, or DOCX</h2>
               </div>
               <label className="upload-action">
                 <Upload size={17} />
                 Choose file
-                <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={ingestFile} />
+                <input
+                  type="file"
+                  accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={ingestFile}
+                />
               </label>
             </div>
 
@@ -290,7 +443,7 @@ function App() {
                 <textarea
                   value={documentText}
                   onChange={(event) => setDocumentText(event.target.value)}
-                  placeholder="Paste real source text here, or choose a .txt/.md file."
+                  placeholder="Paste source text here, or choose a .txt/.md/.pdf/.docx file."
                 />
               </label>
             </div>

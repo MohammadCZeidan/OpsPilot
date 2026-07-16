@@ -9,8 +9,13 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "bcryptjs": "latest",
     "express": "latest",
+    "jsonwebtoken": "latest",
+    "mammoth": "latest",
     "multer": "latest",
+    "pdf-parse": "latest",
+    "pg": "latest",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",

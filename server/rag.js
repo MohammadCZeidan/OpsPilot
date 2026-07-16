@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { localEmbedding, tokenize } from "./embeddingProvider.js";
 
-const EMBEDDING_DIMENSIONS = 64;
 const VALID_FEEDBACK = new Set(["correct", "wrong", "missing_context"]);
 
 export function createWorkspace(name, ownerEmail = "demo@opspilot.local") {
@@ -35,7 +35,7 @@ export function ingestDocument(workspace, file) {
       chunkNumber,
       citation: `${document.filename}#chunk-${chunkNumber}`,
       text: chunk,
-      embedding: embedText(chunk),
+      embedding: localEmbedding(chunk),
       keywords: tokenize(chunk),
     };
   });
@@ -55,7 +55,7 @@ export function ingestDocument(workspace, file) {
 
 export function queryWorkspace(workspace, question) {
   const started = performance.now();
-  const queryEmbedding = embedText(question);
+  const queryEmbedding = localEmbedding(question);
   const queryTerms = tokenize(question);
 
   const ranked = workspace.chunks
@@ -136,32 +136,6 @@ function chunkText(text, maxWords = 80) {
   }
 
   return chunks.length ? chunks : ["Empty document"];
-}
-
-function tokenize(text) {
-  return String(text)
-    .toLowerCase()
-    .match(/[a-z0-9]+/g)
-    ?.filter((token) => token.length > 2) ?? [];
-}
-
-function embedText(text) {
-  const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
-  for (const token of tokenize(text)) {
-    const index = hashToken(token) % EMBEDDING_DIMENSIONS;
-    vector[index] += 1;
-  }
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
-  return vector.map((value) => value / magnitude);
-}
-
-function hashToken(token) {
-  let hash = 2166136261;
-  for (let index = 0; index < token.length; index += 1) {
-    hash ^= token.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
 }
 
 function cosineSimilarity(left, right) {
