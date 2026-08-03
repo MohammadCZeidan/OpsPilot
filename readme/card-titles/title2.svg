@@ -1,0 +1,7 @@
+<svg width="820" height="110" viewBox="0 0 820 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="820" height="110" rx="18" fill="#0B1020"/>
+  <rect x="18" y="18" width="784" height="74" rx="14" fill="#111827" stroke="#22C55E" stroke-width="2"/>
+  <circle cx="62" cy="55" r="18" fill="#22C55E"/>
+  <path d="M52 57h8l4-10 7 18 5-8h10" stroke="#0B1020" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="100" y="66" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="800" fill="#ECFDF5">Project Overview</text>
+</svg>
